@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portafolio</title>
+<style>
+  :root {
+    --texto: #e9edf5;
+    --texto-suave: #8e99ad;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: linear-gradient(#02030a, #070c18);
+    color: var(--texto);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* El canvas queda fijo detrás de todo el contenido */
+  #fondo {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -2;
+    display: block;
+  }
+  /* Oscurece suavemente los bordes para dar profundidad */
+  #vineta {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, .55) 100%);
+  }
+
+  /* Contenido de ejemplo: bórralo y pon tu portafolio */
+  main {
+    min-height: 100%;
+    display: grid;
+    place-content: center;
+    padding: 2rem;
+    pointer-events: none; /* deja pasar el mouse al fondo; quítalo si pones enlaces aquí */
+  }
+  h1 {
+    font-size: clamp(2.6rem, 9vw, 6rem);
+    font-weight: 200;
+    letter-spacing: 0.01em;
+    line-height: 1.05;
+    margin: 0;
+  }
+  p { font-size: 1.1rem; margin: 1.2rem 0 0; max-width: 42ch; line-height: 1.6; color: var(--texto-suave); }
+</style>
+</head>
+<body>
+  <canvas id="fondo" aria-hidden="true"></canvas>
+  <div id="vineta" aria-hidden="true"></div>
+
+  <main>
+    <h1>Gerar Guzmán</h1>
+    <p>Estudiante de Ingeniería en Computación. Mueve el mouse para explorar el espacio y haz clic para lanzar una estrella fugaz.</p>
+  </main>
+
+<script>
+(() => {
+  const canvas = document.getElementById('fondo');
+  const ctx = canvas.getContext('2d');
+  const TAU = Math.PI * 2;
+
+  // ---- Ajustes que puedes cambiar ----
+  const MAX_ESTRELLAS = 900;
+  const PARALAJE = 0.06;        // qué tanto se mueve el fondo con el mouse
+  const FUGACES_CADA = [2000, 5500]; // tiempo entre estrellas fugaces (ms, mínimo y máximo)
+  // ------------------------------------
+
+  const sinMovimiento = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Planetas: posición como fracción de la pantalla (fx, fy), radio, profundidad (z) y color RGB
+  // Colores apagados a propósito para mantener un look sobrio
+  const PLANETAS = [
+    { fx: 0.78, fy: 0.28, r: 30, z: 1.0, c: '176,160,134', bandas: true,  anillo: true },
+    { fx: 0.15, fy: 0.66, r: 16, z: 0.7, c: '120,140,170' },
+    { fx: 0.38, fy: 0.16, r: 8,  z: 0.5, c: '190,195,204' },
+    { fx: 0.62, fy: 0.80, r: 22, z: 1.3, c: '88,100,124',   bandas: true },
+    { fx: 0.92, fy: 0.72, r: 6,  z: 0.4, c: '150,138,128' }
+  ];
+
+  const mouse = { x: 0, y: 0, activo: false };
+  const cam = { x: 0, y: 0 };
+  let w, h, dpr, estrellas = [], fugaces = [], proxima = 1500;
+
+  const envolver = (v, max) => ((v % max) + max) % max;
+
+  function ajustar() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = window.innerWidth;
+    h = window.innerHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const n = Math.min(MAX_ESTRELLAS, Math.floor(w * h / 2600));
+    estrellas = Array.from({ length: n }, () => {
+      const z = Math.pow(Math.random(), 2) * 0.85 + 0.15; // la mayoría están lejos
+      const tipo = Math.random();
+      return {
+        x: Math.random() * w,
+        y: Math.random() * h,
+        z,
+        r: 0.35 + z * 0.9 + (Math.random() < 0.03 ? 0.6 : 0),
+        fase: Math.random() * TAU,
+        vel: 0.5 + Math.random() * 1.5,
+        // casi todas blancas, con un toque muy leve de azul o cálido
+        c: tipo < 0.15 ? '205,220,255' : tipo < 0.25 ? '255,240,220' : '255,255,255'
+      };
+    });
+  }
+
+  window.addEventListener('pointermove', e => {
+    mouse.x = e.clientX; mouse.y = e.clientY; mouse.activo = true;
+  });
+  document.addEventListener('pointerleave', () => { mouse.activo = false; });
+  window.addEventListener('resize', ajustar);
+
+  // Un clic lanza una estrella fugaz desde el cursor
+  window.addEventListener('pointerdown', e => {
+    mouse.x = e.clientX; mouse.y = e.clientY; mouse.activo = true;
+    if (sinMovimiento) return;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const ang = (15 + Math.random() * 40) * Math.PI / 180;
+    crearFugaz(e.clientX, e.clientY, dir * Math.cos(ang), Math.sin(ang));
+  });
+
+  function crearFugaz(x, y, dx, dy) {
+    const v = 11 + Math.random() * 5;
+    fugaces.push({ x, y, vx: dx * v, vy: dy * v, vida: 0, max: 55 + Math.random() * 25, largo: 90 + Math.random() * 90 });
+  }
+
+  function fugazAleatoria() {
+    // Aparece por el borde superior o izquierdo y cruza en diagonal
+    const ang = (20 + Math.random() * 30) * Math.PI / 180;
+    const x = Math.random() * w * 0.9;
+    const y = Math.random() * h * 0.35;
+    crearFugaz(x, y, Math.cos(ang), Math.sin(ang));
+  }
+
+  function dibujarAnillo(x, y, r, mitad) {
+    // mitad 'atras' = parte de arriba (detrás del planeta); 'frente' = parte de abajo
+    const [a0, a1] = mitad === 'atras' ? [Math.PI, TAU] : [0, Math.PI];
+    ctx.lineWidth = r * 0.2;
+    ctx.strokeStyle = 'rgba(200,190,170,0.5)';
+    ctx.beginPath(); ctx.ellipse(x, y, r * 1.8, r * 0.48, -0.35, a0, a1); ctx.stroke();
+    ctx.lineWidth = r * 0.08;
+    ctx.strokeStyle = 'rgba(200,190,170,0.28)';
+    ctx.beginPath(); ctx.ellipse(x, y, r * 2.15, r * 0.57, -0.35, a0, a1); ctx.stroke();
+  }
+
+  function dibujarPlaneta(p, x, y, r) {
+    // Resplandor suave
+    const halo = ctx.createRadialGradient(x, y, r * 0.9, x, y, r * 1.9);
+    halo.addColorStop(0, `rgba(${p.c},0.14)`);
+    halo.addColorStop(1, `rgba(${p.c},0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(x, y, r * 1.9, 0, TAU); ctx.fill();
+
+    if (p.anillo) dibujarAnillo(x, y, r, 'atras');
+
+    // Cuerpo
+    ctx.fillStyle = `rgb(${p.c})`;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+
+    ctx.save();
+    ctx.clip();
+    if (p.bandas) {
+      ctx.fillStyle = 'rgba(0,0,0,0.13)';
+      for (let i = 1; i <= 3; i++) ctx.fillRect(x - r, y - r + r * 0.7 * i, r * 2, r * 0.16);
+    }
+    // Sombra: la luz viene de arriba a la izquierda
+    const sombra = ctx.createRadialGradient(x - r * 0.4, y - r * 0.4, r * 0.1, x - r * 0.4, y - r * 0.4, r * 1.7);
+    sombra.addColorStop(0, 'rgba(255,255,255,0.12)');
+    sombra.addColorStop(0.45, 'rgba(2,4,10,0.1)');
+    sombra.addColorStop(1, 'rgba(2,4,10,0.93)');
+    ctx.fillStyle = sombra;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    ctx.restore();
+
+    if (p.anillo) dibujarAnillo(x, y, r, 'frente');
+  }
+
+  function dibujar(t) {
+    ctx.clearRect(0, 0, w, h);
+
+    // Cámara: sigue al mouse con suavidad (efecto de profundidad)
+    const objX = mouse.activo && !sinMovimiento ? (mouse.x - w / 2) * PARALAJE : 0;
+    const objY = mouse.activo && !sinMovimiento ? (mouse.y - h / 2) * PARALAJE : 0;
+    cam.x += (objX - cam.x) * 0.05;
+    cam.y += (objY - cam.y) * 0.05;
+    const deriva = sinMovimiento ? 0 : t * 0.004; // las estrellas se desplazan muy despacio
+
+    // Luz suave alrededor del cursor
+    if (mouse.activo) {
+      const g = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 220);
+      g.addColorStop(0, 'rgba(190,205,235,0.07)');
+      g.addColorStop(1, 'rgba(190,205,235,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(mouse.x - 220, mouse.y - 220, 440, 440);
+    }
+
+    // Estrellas
+    for (const s of estrellas) {
+      const x = envolver(s.x - cam.x * s.z - deriva * s.z, w + 8) - 4;
+      const y = envolver(s.y - cam.y * s.z, h + 8) - 4;
+      let alfa = 0.35 + s.z * 0.5;
+      if (!sinMovimiento) alfa *= 0.7 + 0.3 * Math.sin(t * 0.002 * s.vel + s.fase);
+      let r = s.r;
+      if (mouse.activo) {
+        const d = Math.hypot(x - mouse.x, y - mouse.y);
+        if (d < 140) { const f = 1 - d / 140; alfa += f * 0.5; r += f * 0.6; }
+      }
+      ctx.fillStyle = `rgba(${s.c},${Math.min(alfa, 1)})`;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    }
+
+    // Planetas
+    const escala = Math.min(1, w / 1200 + 0.4);
+    const m = 120;
+    for (const p of PLANETAS) {
+      const x = envolver(p.fx * w + m - cam.x * p.z * 1.6 - deriva * p.z * 0.6, w + 2 * m) - m;
+      const y = envolver(p.fy * h + m - cam.y * p.z * 1.6, h + 2 * m) - m;
+      dibujarPlaneta(p, x, y, p.r * escala);
+    }
+
+    // Estrellas fugaces
+    if (!sinMovimiento && t > proxima) {
+      fugazAleatoria();
+      proxima = t + FUGACES_CADA[0] + Math.random() * (FUGACES_CADA[1] - FUGACES_CADA[0]);
+    }
+    ctx.lineCap = 'round';
+    for (let k = fugaces.length - 1; k >= 0; k--) {
+      const f = fugaces[k];
+      f.x += f.vx; f.y += f.vy; f.vida++;
+      if (f.vida > f.max) { fugaces.splice(k, 1); continue; }
+      const fade = 1 - f.vida / f.max;
+      const norma = Math.hypot(f.vx, f.vy);
+      const tx = f.x - (f.vx / norma) * f.largo;
+      const ty = f.y - (f.vy / norma) * f.largo;
+      const g = ctx.createLinearGradient(tx, ty, f.x, f.y);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(1, `rgba(255,255,255,${0.9 * fade})`);
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(f.x, f.y); ctx.stroke();
+      ctx.fillStyle = `rgba(255,255,255,${fade})`;
+      ctx.beginPath(); ctx.arc(f.x, f.y, 1.6, 0, TAU); ctx.fill();
+    }
+
+    requestAnimationFrame(dibujar);
+  }
+
+  ajustar();
+  requestAnimationFrame(dibujar);
+})();
+</script>
+</body>
+</html>
